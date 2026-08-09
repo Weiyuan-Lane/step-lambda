@@ -3,7 +3,7 @@ import os
 
 import httpx
 
-from step_lambda.utils.context import Context
+from step_lambda.utils.context import PROCESSING_SES_EMAIL, Context
 from step_lambda.output_steps.output_step import OutputStep
 
 logger = logging.getLogger(__name__)
@@ -11,33 +11,35 @@ logger = logging.getLogger(__name__)
 class OpsgenieOutputStep(OutputStep):
     name = "opsgenie"
 
-    def notify(self, context: Context) -> None:
-        api_key = os.getenv("OPSGENIE_API_KEY")
-        base_url = (os.getenv("OPSGENIE_API_URL") or "https://api.opsgenie.com").rstrip("/")
-        priority = os.getenv("OPSGENIE_PRIORITY", "P3") or "P3"
+    def __init__(self) -> None:
+        self._api_key = os.getenv("OPSGENIE_API_KEY")
+        self._base_url = (os.getenv("OPSGENIE_API_URL") or "https://api.opsgenie.com").rstrip("/")
+        self._priority = os.getenv("OPSGENIE_PRIORITY", "P3") or "P3"
 
-        if not api_key:
+    def notify(self, context: Context) -> None:
+        if not self._api_key:
             raise RuntimeError("OpsgenieOutputStep requires OPSGENIE_API_KEY")
 
-        title = context.get("title") or context.get("email_subject") or "Step Lambda Alert"
-        description = context.get("summary") or context.get("main") or "(no body)"
-        alias = context.get("email_message_id") or None
+        ses_email = context.get(PROCESSING_SES_EMAIL) or {}
+        title = context.get("title") or ses_email.get("subject") or "Step Lambda Alert"
+        description = context.get("summary") or ses_email.get("main") or "(no body)"
+        alias = ses_email.get("message_id") or None
 
         payload: dict = {
             "message": title[:130],
             "description": description[:15000],
-            "priority": priority,
+            "priority": self._priority,
             "source": "step-lambda",
-            "tags": ["step-lambda", context.get("source") or "unknown"],
+            "tags": ["step-lambda", ses_email.get("source") or "unknown"],
         }
         if alias:
             payload["alias"] = alias[:512]
 
         with httpx.Client(timeout=30.0) as client:
             response = client.post(
-                f"{base_url}/v2/alerts",
+                f"{self._base_url}/v2/alerts",
                 headers={
-                    "Authorization": f"GenieKey {api_key}",
+                    "Authorization": f"GenieKey {self._api_key}",
                     "Content-Type": "application/json",
                 },
                 json=payload,

@@ -2,6 +2,9 @@ from typing import Any, TypeVar, overload
 
 T = TypeVar("T")
 
+# Namespaced context keys for step outputs.
+PROCESSING_SES_EMAIL = "processing::ses_email"
+
 
 class Context:
     def __init__(self) -> None:

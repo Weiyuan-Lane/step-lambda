@@ -3,7 +3,8 @@ import os
 from collections.abc import Callable
 from typing import Any
 
-from step_lambda.utils.context import Context
+from step_lambda.utils.context import PROCESSING_SES_EMAIL, Context
+from step_lambda.utils.errors import PipelineError, StopPipeline
 from step_lambda.output_steps.output_step import OutputStep
 from step_lambda.output_steps.jira_output_step import JiraOutputStep
 from step_lambda.output_steps.opsgenie_output_step import OpsgenieOutputStep
@@ -46,19 +47,24 @@ def handler(event: dict[str, Any], lambda_context: Any = None) -> dict[str, Any]
     load_environment()
     logger.info("Handler invoked request_id=%s", getattr(lambda_context, "aws_request_id", None))
     context = run_pipeline(event)
+    ses_email = context.get(PROCESSING_SES_EMAIL) or {}
+    status = context.get("pipeline_status", "ok")
     return {
-        "ok": True,
+        "ok": status != "error",
+        "status": status,
+        "message": context.get("pipeline_message"),
         "input": {
             "email": {
-                "from": context.get("email_from"),
-                "to": context.get("email_to"),
-                "subject": context.get("email_subject"),
-                "body": context.get("email_body"),
-                "message_id": context.get("email_message_id"),
+                "from": ses_email.get("from"),
+                "to": ses_email.get("to"),
+                "subject": ses_email.get("subject"),
+                "body": ses_email.get("body"),
+                "message_id": ses_email.get("message_id"),
+                "attachments": ses_email.get("attachments") or [],
             },
         },
         "metadata": {
-            "source": context.get("source"),
+            "source": ses_email.get("source"),
             "title": context.get("title"),
             "jira_issue_key": context.get("jira_issue_key"),
             "opsgenie_request_id": context.get("opsgenie_request_id"),
@@ -81,16 +87,27 @@ def run_pipeline(
     processing_steps = (
         processing_steps if processing_steps is not None else [factory() for factory in PROCESSING_STEPS]
     )
-    for step in processing_steps:
-        logger.info("Running processing step: %s", step.name)
-        result = step.process(event, context)
-        if result is not None:
-            context = result  # type: ignore[assignment]
-
-    # Execute output steps sequentially
     output_steps = output_steps if output_steps is not None else [factory() for factory in OUTPUT_STEPS]
-    for output in output_steps:
-        logger.info("Running output step: %s", output.name)
-        output.notify(context)
+
+    try:
+        for step in processing_steps:
+            logger.info("Running processing step: %s", step.name)
+            result = step.process(event, context)
+            if result is not None:
+                context = result  # type: ignore[assignment]
+
+        for output in output_steps:
+            logger.info("Running output step: %s", output.name)
+            output.notify(context)
+    except StopPipeline as exc:
+        logger.info("Pipeline stopped early: %s", exc)
+        context.set("pipeline_status", "stopped")
+        context.set("pipeline_message", str(exc) or None)
+    except PipelineError as exc:
+        logger.error("Pipeline failed: %s", exc)
+        context.set("pipeline_status", "error")
+        context.set("pipeline_message", str(exc) or None)
+    else:
+        context.set("pipeline_status", "ok")
 
     return context

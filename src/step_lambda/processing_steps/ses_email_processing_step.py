@@ -1,18 +1,19 @@
 import email
 import logging
-import os
 from email.message import Message
 from typing import Any
+from urllib.parse import unquote_plus
 
 import boto3
 
-from step_lambda.utils.context import Context
+from step_lambda.utils.context import PROCESSING_SES_EMAIL, Context
+from step_lambda.utils.errors import PipelineError
 from step_lambda.processing_steps.processing_step import ProcessingStep
 
 logger = logging.getLogger(__name__)
 
 class SESEmailProcessingStep(ProcessingStep):
-    """Parse the SES-triggered Lambda event (direct SES or SES → S3) into context."""
+    """Parse an SES → S3 email object into context."""
 
     name = "ses"
 
@@ -26,83 +27,54 @@ class SESEmailProcessingStep(ProcessingStep):
         return self._s3_client
 
     def process(self, event: dict[str, Any], context: Context) -> Context:
-        mail_meta, raw_bytes = self._load_email(event)
+        raw_bytes = self._load_email(event)
         parsed = email.message_from_bytes(raw_bytes) if raw_bytes else None
 
-        subject = mail_meta.get("subject") or (parsed["Subject"] if parsed else "") or ""
-        from_addr = mail_meta.get("from") or (parsed["From"] if parsed else "") or ""
-        to_addrs = mail_meta.get("to") or []
-        if not to_addrs and parsed is not None:
-            to_header = parsed.get("To") or ""
-            to_addrs = [a.strip() for a in to_header.split(",") if a.strip()]
-        message_id = mail_meta.get("messageId") or (parsed["Message-ID"] if parsed else "") or ""
-        body = self._extract_body(parsed) if parsed else mail_meta.get("body", "")
+        subject = (parsed["Subject"] if parsed else "") or ""
+        from_addr = (parsed["From"] if parsed else "") or ""
+        to_header = (parsed.get("To") if parsed else "") or ""
+        to_addrs = [a.strip() for a in to_header.split(",") if a.strip()]
+        message_id = (parsed["Message-ID"] if parsed else "") or ""
+        body = self._extract_body(parsed) if parsed else ""
+        attachments = self._extract_attachments(parsed)
 
-        context.set("source", self.name)
-        context.set("email_from", from_addr)
-        context.set("email_to", to_addrs)
-        context.set("email_subject", subject)
-        context.set("email_body", body)
-        context.set("email_message_id", message_id)
-        # Primary text for downstream Bedrock (and other) steps.
-        context.set("main", f"Subject: {subject}\n\n{body}".strip())
+        email_context = {
+            "source": self.name,
+            "from": from_addr,
+            "to": to_addrs,
+            "subject": subject,
+            "body": body,
+            "message_id": message_id,
+            "attachments": attachments,
+            # Primary text for downstream Bedrock (and other) steps.
+            "main": f"Subject: {subject}\n\n{body}".strip(),
+        }
+        context.set(PROCESSING_SES_EMAIL, email_context)
 
         logger.info(
-            "SES email parsed message_id=%s from=%s subject=%r",
+            "SES email parsed message_id=%s from=%s subject=%r attachments=%d context=%r",
             message_id,
             from_addr,
             subject[:80],
+            len(attachments),
+            email_context,
         )
         return context
 
-    def _load_email(self, event: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
+    def _load_email(self, event: dict[str, Any]) -> bytes:
         records = event.get("Records") or []
         record = records[0] if records else {}
 
-        # Direct SES invocation
-        if record.get("eventSource") == "aws:ses" or "ses" in record:
-            ses = record.get("ses") or event.get("ses") or {}
-            mail = ses.get("mail") or {}
-            meta = {
-                "subject": (mail.get("commonHeaders") or {}).get("subject")
-                or mail.get("subject"),
-                "from": ((mail.get("commonHeaders") or {}).get("from") or [None])[0]
-                or (mail.get("source")),
-                "to": (mail.get("commonHeaders") or {}).get("to") or mail.get("destination") or [],
-                "messageId": mail.get("messageId"),
-            }
-            raw = self._fetch_from_s3_by_message_id(meta.get("messageId"))
-            return meta, raw
-
-        # S3 object created by SES receipt rule
-        if record.get("eventSource") == "aws:s3":
-            s3_info = record["s3"]
-            bucket = s3_info["bucket"]["name"]
-            key = s3_info["object"]["key"]
-            obj = self._s3.get_object(Bucket=bucket, Key=key)
-            raw = obj["Body"].read()
-            return {}, raw
-
-        return {}, b""
-
-    def _fetch_from_s3_by_message_id(self, message_id: str | None) -> bytes:
-        bucket = os.getenv("SES_EMAIL_BUCKET")
-        prefix = os.getenv("SES_EMAIL_PREFIX", "incoming/")
-        if not bucket or not message_id:
-            logger.warning(
-                "SES email body unavailable (bucket=%r message_id=%r); "
-                "headers-only context will be used",
-                bucket,
-                message_id,
+        if record.get("eventSource") != "aws:s3":
+            raise PipelineError(
+                f"Expected aws:s3 event; got eventSource={record.get('eventSource')!r}"
             )
-            return b""
-        key = f"{prefix}{message_id}"
-        try:
-            obj = self._s3.get_object(Bucket=bucket, Key=key)
-            return obj["Body"].read()
-        except Exception:
-            logger.exception("Failed to fetch SES email s3://%s/%s", bucket, key)
-            return b""
+
+        s3_info = record["s3"]
+        bucket = s3_info["bucket"]["name"]
+        key = unquote_plus(s3_info["object"]["key"])
+        obj = self._s3.get_object(Bucket=bucket, Key=key)
+        return obj["Body"].read()
 
     @staticmethod
     def _extract_body(msg: Message) -> str:
@@ -128,3 +100,19 @@ class SESEmailProcessingStep(ProcessingStep):
         payload = msg.get_payload(decode=True) or b""
         charset = msg.get_content_charset() or "utf-8"
         return payload.decode(charset, errors="replace")
+
+    @staticmethod
+    def _extract_attachments(msg: Message | None) -> list[dict[str, str]]:
+        """Return attachment metadata (filename only) from a parsed MIME message."""
+        if msg is None:
+            return []
+
+        attachments: list[dict[str, str]] = []
+        for part in msg.walk():
+            if part.get_content_maintype() == "multipart":
+                continue
+            filename = part.get_filename()
+            if not filename:
+                continue
+            attachments.append({"filename": str(filename)})
+        return attachments

@@ -2,10 +2,10 @@
 
 AWS Lambda pipeline: **Processing Steps → Output Steps**, configured in `main.py`.
 
-SES triggers the Lambda (directly or via S3); the first processing step parses that event.
+SES stores inbound mail in S3; S3 notifies the Lambda. The first processing step parses that object.
 
 ```
-SES trigger ──► SES parse ──► Bedrock triage ──► Slack / Jira / Opsgenie
+SES → S3 ──► SES parse ──► Bedrock triage ──► Slack / Jira / Opsgenie
 ```
 
 ## Layout
@@ -59,7 +59,7 @@ Terraform runs `scripts/build_step_lambda.sh` (via `uv`) to build `.build/step-l
 - Lambda (`python3.14`, handler `step_lambda.main.handler`)
 - Secrets Manager secret (credentials for Jira / Slack / Opsgenie)
 - S3 bucket for inbound SES mail
-- SES domain identity + receipt rule (S3 store → Lambda invoke)
+- SES domain identity + receipt rule (S3 store) and S3 → Lambda notification
 - IAM role with S3 read, Secrets Manager read, Bedrock invoke
 
 2. Finish SES DNS: apply the TXT / DKIM values from `terraform output`, and point the domain MX to `inbound-smtp.<region>.amazonaws.com`.

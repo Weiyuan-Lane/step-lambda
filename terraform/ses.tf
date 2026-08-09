@@ -65,14 +65,20 @@ resource "aws_ses_receipt_rule" "inbound" {
     position          = 1
   }
 
-  lambda_action {
-    function_arn    = aws_lambda_function.app.arn
-    invocation_type = "Event"
-    position        = 2
-  }
-
   depends_on = [
-    aws_lambda_permission.allow_ses,
     aws_s3_bucket_policy.ses_email,
   ]
+}
+
+# SES stores the raw email; S3 notifies Lambda once per object (no double trigger).
+resource "aws_s3_bucket_notification" "ses_email" {
+  bucket = aws_s3_bucket.ses_email.id
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.app.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "incoming/"
+  }
+
+  depends_on = [aws_lambda_permission.allow_s3]
 }

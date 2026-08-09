@@ -3,7 +3,7 @@ import os
 
 import httpx
 
-from step_lambda.utils.context import Context
+from step_lambda.utils.context import PROCESSING_SES_EMAIL, Context
 from step_lambda.output_steps.output_step import OutputStep
 
 logger = logging.getLogger(__name__)
@@ -11,19 +11,21 @@ logger = logging.getLogger(__name__)
 class SlackOutputStep(OutputStep):
     name = "slack"
 
-    def notify(self, context: Context) -> None:
-        webhook = os.getenv("SLACK_WEBHOOK_URL")
-        bot_token = os.getenv("SLACK_BOT_TOKEN")
-        channel = os.getenv("SLACK_CHANNEL")
+    def __init__(self) -> None:
+        self._webhook = os.getenv("SLACK_WEBHOOK_URL")
+        self._bot_token = os.getenv("SLACK_BOT_TOKEN")
+        self._channel = os.getenv("SLACK_CHANNEL")
 
-        title = context.get("title") or context.get("email_subject") or "Step Lambda Alert"
-        summary = context.get("summary") or context.get("main") or "(no body)"
+    def notify(self, context: Context) -> None:
+        ses_email = context.get(PROCESSING_SES_EMAIL) or {}
+        title = context.get("title") or ses_email.get("subject") or "Step Lambda Alert"
+        summary = context.get("summary") or ses_email.get("main") or "(no body)"
         text = f"*{title}*\n{summary}"
 
-        if webhook:
-            self._post_webhook(webhook, text)
-        elif bot_token and channel:
-            self._post_api(bot_token, channel, text)
+        if self._webhook:
+            self._post_webhook(self._webhook, text)
+        elif self._bot_token and self._channel:
+            self._post_api(self._bot_token, self._channel, text)
         else:
             raise RuntimeError(
                 "SlackOutputStep requires SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN + SLACK_CHANNEL"

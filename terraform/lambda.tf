@@ -40,8 +40,6 @@ resource "aws_lambda_function" "app" {
     variables = {
       ENVIRONMENT         = var.environment
       SECRETS_MANAGER_ARN = aws_secretsmanager_secret.app.arn
-      SES_EMAIL_BUCKET    = aws_s3_bucket.ses_email.id
-      SES_EMAIL_PREFIX    = "incoming/"
       BEDROCK_MODEL_ID    = var.bedrock_model_id
       BEDROCK_CONTEXT_KEY = "main"
       LOG_LEVEL           = "INFO"
@@ -55,10 +53,11 @@ resource "aws_lambda_function" "app" {
   ]
 }
 
-resource "aws_lambda_permission" "allow_ses" {
-  statement_id  = "AllowExecutionFromSES"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.app.function_name
-  principal     = "ses.amazonaws.com"
+resource "aws_lambda_permission" "allow_s3" {
+  statement_id   = "AllowExecutionFromS3"
+  action         = "lambda:InvokeFunction"
+  function_name  = aws_lambda_function.app.function_name
+  principal      = "s3.amazonaws.com"
+  source_arn     = aws_s3_bucket.ses_email.arn
   source_account = data.aws_caller_identity.current.account_id
 }
