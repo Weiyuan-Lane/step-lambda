@@ -4,6 +4,9 @@ T = TypeVar("T")
 
 # Namespaced context keys for step outputs.
 PROCESSING_SES_EMAIL = "processing::ses_email"
+PROCESSING_BEDROCK = "processing::bedrock"
+OUTPUT_JIRA = "output::jira"
+OUTPUT_SLACK = "output::slack"
 
 
 class Context:

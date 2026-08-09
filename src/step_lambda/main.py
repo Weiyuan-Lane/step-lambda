@@ -3,14 +3,19 @@ import os
 from collections.abc import Callable
 from typing import Any
 
-from step_lambda.utils.context import PROCESSING_SES_EMAIL, Context
+from step_lambda.utils.context import (
+    OUTPUT_JIRA,
+    OUTPUT_SLACK,
+    PROCESSING_SES_EMAIL,
+    Context,
+)
 from step_lambda.utils.errors import PipelineError, StopPipeline
 from step_lambda.output_steps.output_step import OutputStep
 from step_lambda.output_steps.jira_output_step import JiraOutputStep
-from step_lambda.output_steps.opsgenie_output_step import OpsgenieOutputStep
 from step_lambda.output_steps.slack_output_step import SlackOutputStep
 from step_lambda.processing_steps.processing_step import ProcessingStep
 from step_lambda.processing_steps.ses_email_processing_step import SESEmailProcessingStep
+from step_lambda.processing_steps.filter_from_processing_step import FilterFromProcessingStep
 from step_lambda.processing_steps.bedrock_processing_step import BedrockProcessingStep
 from step_lambda.config import load_environment
 
@@ -27,14 +32,14 @@ if not logging.getLogger().handlers:
 # Run sequentially; earlier steps can populate context for later ones.
 PROCESSING_STEPS: list[Callable[[], ProcessingStep]] = [
     SESEmailProcessingStep,
+    FilterFromProcessingStep,
     BedrockProcessingStep,
 ]
 
 # Run sequentially after processing completes.
 OUTPUT_STEPS: list[Callable[[], OutputStep]] = [
-    SlackOutputStep,
     JiraOutputStep,
-    OpsgenieOutputStep,
+    SlackOutputStep,
 ]
 
 # ---------------------------------------------------------------------------
@@ -48,6 +53,8 @@ def handler(event: dict[str, Any], lambda_context: Any = None) -> dict[str, Any]
     logger.info("Handler invoked request_id=%s", getattr(lambda_context, "aws_request_id", None))
     context = run_pipeline(event)
     ses_email = context.get(PROCESSING_SES_EMAIL) or {}
+    jira = context.get(OUTPUT_JIRA) or {}
+    slack = context.get(OUTPUT_SLACK) or {}
     status = context.get("pipeline_status", "ok")
     return {
         "ok": status != "error",
@@ -64,11 +71,9 @@ def handler(event: dict[str, Any], lambda_context: Any = None) -> dict[str, Any]
             },
         },
         "metadata": {
-            "source": ses_email.get("source"),
-            "title": context.get("title"),
-            "jira_issue_key": context.get("jira_issue_key"),
-            "opsgenie_request_id": context.get("opsgenie_request_id"),
-            "slack_notified": context.get("slack_notified", False),
+            "jira_issue_key": jira.get("issue_key"),
+            "jira_url": jira.get("url"),
+            "slack_notified": bool(slack.get("notified")),
         },
     }
 

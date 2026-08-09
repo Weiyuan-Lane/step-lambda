@@ -35,6 +35,7 @@ class SESEmailProcessingStep(ProcessingStep):
         to_header = (parsed.get("To") if parsed else "") or ""
         to_addrs = [a.strip() for a in to_header.split(",") if a.strip()]
         message_id = (parsed["Message-ID"] if parsed else "") or ""
+        date = (parsed["Date"] if parsed else "") or ""
         body = self._extract_body(parsed) if parsed else ""
         attachments = self._extract_attachments(parsed)
 
@@ -43,11 +44,12 @@ class SESEmailProcessingStep(ProcessingStep):
             "from": from_addr,
             "to": to_addrs,
             "subject": subject,
+            "date": date,
             "body": body,
             "message_id": message_id,
             "attachments": attachments,
             # Primary text for downstream Bedrock (and other) steps.
-            "main": f"Subject: {subject}\n\n{body}".strip(),
+            "main": f"Subject: {subject}\nDate: {date}\n\n{body}".strip(),
         }
         context.set(PROCESSING_SES_EMAIL, email_context)
 

@@ -41,7 +41,8 @@ resource "aws_lambda_function" "app" {
       ENVIRONMENT         = var.environment
       SECRETS_MANAGER_ARN = aws_secretsmanager_secret.app.arn
       BEDROCK_MODEL_ID    = var.bedrock_model_id
-      BEDROCK_CONTEXT_KEY = "main"
+      FILTER_FROM_EMAILS  = var.filter_from_emails
+      SLACK_NOTIFY_HANDLES = var.slack_notify_handles
       LOG_LEVEL           = "INFO"
     }
   }

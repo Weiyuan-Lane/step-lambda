@@ -1,7 +1,7 @@
 [project]
 name = "step-lambda"
 version = "0.1.0"
-description = "AWS Lambda ProcessingStep → OutputStep pipeline (SES, Bedrock, Slack/Jira/Opsgenie)"
+description = "AWS Lambda ProcessingStep → OutputStep pipeline (SES, Bedrock, Slack/Jira)"
 readme = "README.md"
 authors = [
     { name = "Weiyuan Liu", email = "weiyuan.lane@gmail.com" }

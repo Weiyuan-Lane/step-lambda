@@ -38,6 +38,18 @@ variable "bedrock_model_id" {
   default     = "anthropic.claude-3-haiku-20240307-v1:0"
 }
 
+variable "filter_from_emails" {
+  description = "Comma-separated From allowlist for FilterFromProcessingStep (empty = allow all)"
+  type        = string
+  default     = ""
+}
+
+variable "slack_notify_handles" {
+  description = "Comma-separated Slack member/usergroup IDs or @handles to notify in Slack notifications"
+  type        = string
+  default     = ""
+}
+
 variable "lambda_timeout" {
   description = "Lambda timeout in seconds"
   type        = number
@@ -55,7 +67,7 @@ variable "secret_values" {
     Initial JSON secret payload (sensitive). Keys are loaded into the Lambda
     environment at runtime via Secrets Manager. Typical keys:
     JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY,
-    SLACK_WEBHOOK_URL, OPSGENIE_API_KEY, OPSGENIE_PRIORITY
+    JIRA_ASSIGNEE_ACCOUNT_ID, SLACK_BOT_TOKEN, SLACK_CHANNEL
   EOT
   type        = map(string)
   sensitive   = true
