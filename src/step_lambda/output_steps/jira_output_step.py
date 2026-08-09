@@ -37,18 +37,16 @@ class JiraOutputStep(OutputStep):
                 self._assignee_account_id,
             ]
         ):
-            raise RuntimeError(
+            logger.error(
                 "JiraOutputStep requires JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, "
-                "JIRA_PROJECT_KEY, JIRA_ASSIGNEE_ACCOUNT_ID"
+                "JIRA_PROJECT_KEY, JIRA_ASSIGNEE_ACCOUNT_ID; skipping"
             )
+            return
 
         bedrock = context.get(PROCESSING_BEDROCK) or {}
         tasks = bedrock.get("tasks") or []
         if not isinstance(tasks, list):
             tasks = []
-        if not tasks:
-            logger.info("No tasks in context; skipping Jira issue creation")
-            return
 
         ses_email = context.get(PROCESSING_SES_EMAIL) or {}
         subject = ses_email.get("subject") or "(no subject)"
@@ -65,22 +63,27 @@ class JiraOutputStep(OutputStep):
         }
 
         url = f"{self._base_url}/rest/api/3/issue"
-        with httpx.Client(timeout=30.0) as client:
-            response = client.post(
-                url,
-                json=payload,
-                auth=(self._email, self._api_token),
-                headers={"Accept": "application/json", "Content-Type": "application/json"},
-            )
-            response.raise_for_status()
-            data = response.json()
-            issue_key = data.get("key")
-            issue_url = f"{self._base_url}/browse/{issue_key}" if issue_key else None
-            context.set(
-                OUTPUT_JIRA,
-                {"issue_key": issue_key, "url": issue_url},
-            )
-            logger.info("Created Jira issue %s (%s)", issue_key, issue_url)
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.post(
+                    url,
+                    json=payload,
+                    auth=(self._email, self._api_token),
+                    headers={"Accept": "application/json", "Content-Type": "application/json"},
+                )
+                response.raise_for_status()
+                data = response.json()
+        except Exception:
+            logger.exception("Failed to create Jira issue; continuing pipeline")
+            return
+
+        issue_key = data.get("key")
+        issue_url = f"{self._base_url}/browse/{issue_key}" if issue_key else None
+        context.set(
+            OUTPUT_JIRA,
+            {"issue_key": issue_key, "url": issue_url},
+        )
+        logger.info("Created Jira issue %s (%s)", issue_key, issue_url)
 
     @classmethod
     def _build_description(
@@ -100,27 +103,37 @@ class JiraOutputStep(OutputStep):
                     {"type": "text", "text": "Tasks", "marks": [{"type": "strong"}]}
                 ],
             },
-            {
-                "type": "bulletList",
-                "content": [
-                    {
-                        "type": "listItem",
-                        "content": [
-                            {
-                                "type": "paragraph",
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": cls._format_task_line(task),
-                                    }
-                                ],
-                            }
-                        ],
-                    }
-                    for task in tasks
-                ],
-            },
         ]
+        if tasks:
+            content.append(
+                {
+                    "type": "bulletList",
+                    "content": [
+                        {
+                            "type": "listItem",
+                            "content": [
+                                {
+                                    "type": "paragraph",
+                                    "content": [
+                                        {
+                                            "type": "text",
+                                            "text": cls._format_task_line(task),
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                        for task in tasks
+                    ],
+                }
+            )
+        else:
+            content.append(
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": "No tasks detected."}],
+                }
+            )
         return {"type": "doc", "version": 1, "content": content}
 
     @staticmethod

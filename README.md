@@ -5,7 +5,7 @@ AWS Lambda pipeline: **Processing Steps → Output Steps**, configured in `main.
 SES stores inbound mail in S3; S3 notifies the Lambda. The first processing step parses that object.
 
 ```
-SES → S3 ──► SES parse ──► From filter ──► Bedrock triage ──► Slack / Jira
+SES → S3 ──► SES parse ──► From filter ──► Bedrock ──► Jira / Slack
 ```
 
 ## Layout
@@ -16,7 +16,7 @@ src/step_lambda/
   config.py               # dotenv + Secrets Manager (production only)
   utils/                  # shared helpers (Context, …)
   processing_steps/       # steps (SESEmail, FilterFrom, Bedrock, …)
-  output_steps/           # notifiers (Slack, Jira)
+  output_steps/           # notifiers (Jira, Slack)
 terraform/                # SES, Lambda, Secrets Manager, IAM, S3
 ```
 
@@ -25,7 +25,8 @@ terraform/                # SES, Lambda, Secrets Manager, IAM, S3
 1. **Processing steps** – run in list order; each may add keys for later stages.
 2. **Output steps** – run in list order; each notifies using the final context.
 
-SES parsing reads the Lambda `event`, injects `processing::ses_email` (including `main` = subject + body).
+SES parsing reads the Lambda `event` and injects `processing::ses_email`
+(`subject`, `body`, `from`, attachments, …).
 `FilterFromProcessingStep` allowlists `From` via `FILTER_FROM_EMAILS` (comma-separated); non-matches raise `StopPipeline`.
 Bedrock builds a user prompt from the email body and attachment filenames,
 forces a Converse tool call, and sets `processing::bedrock` (`tasks`) on the
@@ -73,5 +74,5 @@ Terraform runs `scripts/build_step_lambda.sh` (via `uv`) to build `.build/step-l
 ## Adding a component
 
 1. Subclass `ProcessingStep` / `OutputStep` in the matching package.
-2. Register an instance in `main.py` (`PROCESSING_STEPS` / `OUTPUT_STEPS`) in the desired order.
+2. Add the class to `PROCESSING_STEPS` / `OUTPUT_STEPS` in `main.py` in the desired order.
 3. Document any new context keys you read or write.

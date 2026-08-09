@@ -39,7 +39,7 @@ Rules:
 3. Each task must use one of the allowed types above and its matching fixed filename.
 4. Do not invent new task types or filenames.
 5. Only include types that clearly apply to the email.
-6. The email message may indicate the date/time of the task. Use it to resolve relative dates
+6. The email message may indicate the date/time of the task. Use it to resolve tasks' completion dates
    (e.g. "tomorrow", "next Monday", "in 2 hours").
 7. For process_date:
    - ISO 8601 datetime when a specific time is known (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, optional timezone)

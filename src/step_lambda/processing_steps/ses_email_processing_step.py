@@ -48,8 +48,6 @@ class SESEmailProcessingStep(ProcessingStep):
             "body": body,
             "message_id": message_id,
             "attachments": attachments,
-            # Primary text for downstream Bedrock (and other) steps.
-            "main": f"Subject: {subject}\nDate: {date}\n\n{body}".strip(),
         }
         context.set(PROCESSING_SES_EMAIL, email_context)
 
