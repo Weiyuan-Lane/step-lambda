@@ -1,0 +1,32 @@
+[project]
+name = "step-lambda"
+version = "0.1.0"
+description = "AWS Lambda ProcessingStep → OutputStep pipeline (SES, Bedrock, Slack/Jira/Opsgenie)"
+readme = "README.md"
+authors = [
+    { name = "Weiyuan Liu", email = "weiyuan.lane@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "boto3>=1.43.67",
+    "httpx>=0.28.1",
+    "python-dotenv>=1.2.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.10.7,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"

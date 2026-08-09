@@ -1,0 +1,19 @@
+aws_region    = "ap-southeast-1"
+project_name  = "step-lambda"
+environment   = "production"
+
+# Domain you control; MX must point to inbound-smtp.<region>.amazonaws.com for SES inbound
+ses_domain    = "alerts.example.com"
+ses_recipient = "triage@alerts.example.com"
+
+bedrock_model_id = "anthropic.claude-3-haiku-20240307-v1:0"
+
+secret_values = {
+  JIRA_BASE_URL     = "https://your-org.atlassian.net"
+  JIRA_EMAIL        = "bot@example.com"
+  JIRA_API_TOKEN    = "replace-me"
+  JIRA_PROJECT_KEY  = "OPS"
+  SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+  OPSGENIE_API_KEY  = "replace-me"
+  OPSGENIE_PRIORITY = "P3"
+}
