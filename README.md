@@ -17,7 +17,8 @@ src/step_lambda/
   utils/                  # shared helpers (Context, …)
   processing_steps/       # steps (SESEmail, FilterFrom, Bedrock, …)
   output_steps/           # notifiers (Jira, Slack)
-terraform/                # SES, Lambda, Secrets Manager, IAM, S3
+terraform/                # root: providers + module wiring
+  modules/step-lambda/    # SES, Lambda, Secrets Manager, IAM, S3
 ```
 
 ## Pipeline contract
@@ -52,7 +53,7 @@ cp .env.example .env
 
 ```bash
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-# set ses_domain, ses_recipient, secret_values
+# set step_lambda_ses_domain, step_lambda_ses_recipient, step_lambda_secret_values
 
 cd terraform
 terraform init

@@ -10,13 +10,13 @@ resource "aws_secretsmanager_secret_version" "app" {
     merge(
       {
         # Placeholders – override via terraform.tfvars / -var secret_values
-        JIRA_BASE_URL             = ""
-        JIRA_EMAIL                = ""
-        JIRA_API_TOKEN            = ""
-        JIRA_PROJECT_KEY          = ""
-        JIRA_ASSIGNEE_ACCOUNT_ID  = ""
-        SLACK_BOT_TOKEN           = ""
-        SLACK_CHANNEL             = ""
+        JIRA_BASE_URL            = ""
+        JIRA_EMAIL               = ""
+        JIRA_API_TOKEN           = ""
+        JIRA_PROJECT_KEY         = ""
+        JIRA_ASSIGNEE_ACCOUNT_ID = ""
+        SLACK_BOT_TOKEN          = ""
+        SLACK_CHANNEL            = ""
       },
       var.secret_values
     )

@@ -1,16 +1,17 @@
 locals {
-  package_dir    = "${path.module}/../.build/lambda"
-  package_zip    = "${path.module}/../.build/step-lambda.zip"
-  source_hash    = filesha256("${path.module}/../uv.lock")
-  project_root   = abspath("${path.module}/..")
+  # Module lives at terraform/modules/step-lambda; project root is three levels up.
+  package_dir  = "${path.module}/../../../.build/lambda"
+  package_zip  = "${path.module}/../../../.build/step-lambda.zip"
+  source_hash  = filesha256("${path.module}/../../../uv.lock")
+  project_root = abspath("${path.module}/../../..")
 }
 
 # Build a Lambda-compatible zip with uv (dependencies + src).
 resource "null_resource" "lambda_package" {
   triggers = {
     uv_lock     = local.source_hash
-    pyproject   = filesha256("${path.module}/../pyproject.toml")
-    source_tree = sha256(join("", [for f in fileset("${path.module}/../src", "**/*.py") : filesha256("${path.module}/../src/${f}")]))
+    pyproject   = filesha256("${path.module}/../../../pyproject.toml")
+    source_tree = sha256(join("", [for f in fileset("${path.module}/../../../src", "**/*.py") : filesha256("${path.module}/../../../src/${f}")]))
   }
 
   provisioner "local-exec" {
@@ -38,12 +39,12 @@ resource "aws_lambda_function" "app" {
 
   environment {
     variables = {
-      ENVIRONMENT         = var.environment
-      SECRETS_MANAGER_ARN = aws_secretsmanager_secret.app.arn
-      BEDROCK_MODEL_ID    = var.bedrock_model_id
-      FILTER_FROM_EMAILS  = var.filter_from_emails
+      ENVIRONMENT          = var.environment
+      SECRETS_MANAGER_ARN  = aws_secretsmanager_secret.app.arn
+      BEDROCK_MODEL_ID     = var.bedrock_model_id
+      FILTER_FROM_EMAILS   = var.filter_from_emails
       SLACK_NOTIFY_HANDLES = var.slack_notify_handles
-      LOG_LEVEL           = "INFO"
+      LOG_LEVEL            = "INFO"
     }
   }
 

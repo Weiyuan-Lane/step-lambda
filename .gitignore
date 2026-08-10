@@ -17,6 +17,7 @@ wheels/
 .env.local
 terraform/terraform.tfvars
 terraform/*.auto.tfvars
+terraform/tfplan
 
 # Lambda build artifacts
 .build/
