@@ -39,8 +39,8 @@ Rules:
 3. Each task must use one of the allowed types above and its matching fixed filename.
 4. Do not invent new task types or filenames.
 5. Only include types that clearly apply to the email.
-6. The email message may indicate the date/time of the task. Use it to resolve tasks' completion dates
-   (e.g. "tomorrow", "next Monday", "in 2 hours").
+6. Use Email received date as the reference for relative dates in the body
+   (e.g. "tomorrow", "next Monday", "end of month", "in 2 hours").
 7. For process_date:
    - ISO 8601 datetime when a specific time is known (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, optional timezone)
    - "now" if the task should be processed immediately
@@ -148,10 +148,12 @@ class BedrockProcessingStep(ProcessingStep):
 
     @classmethod
     def _build_user_prompt(cls, ses_email: dict[str, Any]) -> str:
+        received_date = ses_email.get("date") or "(unknown)"
         body = ses_email.get("body") or ""
         attachment_names = cls._attachment_names(ses_email.get("attachments") or [])
         attachments_section = cls._format_attachments_section(attachment_names)
         return (
+            f"Email received date: {received_date}\n\n"
             f"Email body:\n{body}\n\n"
             f"{attachments_section}"
         )

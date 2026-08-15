@@ -71,7 +71,18 @@ class JiraOutputStep(OutputStep):
                     auth=(self._email, self._api_token),
                     headers={"Accept": "application/json", "Content-Type": "application/json"},
                 )
-                response.raise_for_status()
+                if response.is_error:
+                    logger.error(
+                        "Failed to create Jira issue (%s %s): %s",
+                        response.status_code,
+                        response.reason_phrase,
+                        response.text,
+                    )
+                    print(
+                        f"Jira create issue error {response.status_code}: {response.text}",
+                        flush=True,
+                    )
+                    return
                 data = response.json()
         except Exception:
             logger.exception("Failed to create Jira issue; continuing pipeline")

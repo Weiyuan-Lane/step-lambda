@@ -96,9 +96,9 @@ class SlackOutputStep(OutputStep):
         tasks_section = f"*Tasks*\n{task_text}"
         jira_line = cls._format_jira_line(jira_url, jira_issue_key, mrkdwn=True)
         if jira_line:
-            tasks_section = f"{tasks_section}\n{jira_line}"
+            tasks_section = f"{tasks_section}\n\n{jira_line}"
 
-        intro = f"An email was received with subject:\n*{cls._escape_mrkdwn(subject)}*"
+        intro = f"*An email was received with subject:*\n{cls._escape_mrkdwn(subject)}"
         if mentions:
             intro = f"{mentions}\n{intro}"
 
@@ -130,7 +130,7 @@ class SlackOutputStep(OutputStep):
             return None
         label = jira_issue_key or "Jira task"
         if mrkdwn:
-            return f"Jira: <{jira_url}|{label}>"
+            return f"*Jira:* <{jira_url}|{label}>"
         return f"Jira: {label} ({jira_url})"
 
     @staticmethod
@@ -195,7 +195,16 @@ class SlackOutputStep(OutputStep):
             response = client.post(
                 "https://slack.com/api/chat.postMessage",
                 headers={"Authorization": f"Bearer {token}"},
-                json={"channel": channel, "text": text, "blocks": blocks},
+                json={
+                    "channel": channel,
+                    "attachments": [
+                        {
+                            "color": "#ECB22E",
+                            "fallback": text,
+                            "blocks": blocks,
+                        }
+                    ],
+                },
             )
             response.raise_for_status()
             data = response.json()

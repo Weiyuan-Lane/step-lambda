@@ -50,6 +50,15 @@ data "aws_iam_policy_document" "lambda_app" {
     ]
     resources = ["*"]
   }
+
+  statement {
+    sid = "BedrockMarketplace"
+    actions = [
+      "aws-marketplace:ViewSubscriptions",
+      "aws-marketplace:Subscribe",
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "lambda_app" {
