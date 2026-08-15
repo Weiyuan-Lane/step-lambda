@@ -29,7 +29,7 @@ variable "ses_rule_set_name" {
 variable "bedrock_model_id" {
   description = "Bedrock model ID used by the processing step"
   type        = string
-  default     = "anthropic.claude-3-haiku-20240307-v1:0"
+  default     = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 }
 
 variable "filter_from_emails" {

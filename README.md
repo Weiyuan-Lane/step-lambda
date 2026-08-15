@@ -30,9 +30,10 @@ SES parsing reads the Lambda `event` and injects `processing::ses_email`
 (`subject`, `body`, `from`, attachments, …).
 `FilterFromProcessingStep` allowlists `From` via `FILTER_FROM_EMAILS` (comma-separated); non-matches raise `StopPipeline`.
 Bedrock builds a user prompt from the email body and attachment filenames,
-forces a Converse tool call, and sets `processing::bedrock` (`tasks`) on the
-context. Edit the tool schema in `bedrock_processing_step.py` to change the
-extracted fields.
+asks Converse for schema-constrained JSON, and sets `processing::bedrock`
+(`tasks`) on the context. Edit the output schema in
+`bedrock_processing_step.py` to change the extracted fields. Requires a
+Claude 4.5+ (or other structured-output) model.
 
 Edit order / membership via the step lists in [`src/step_lambda/main.py`](src/step_lambda/main.py)
 (`PROCESSING_STEPS`, `OUTPUT_STEPS`).

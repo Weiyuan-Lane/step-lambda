@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from typing import Any
@@ -9,6 +10,8 @@ from step_lambda.utils.errors import PipelineError
 from step_lambda.processing_steps.processing_step import ProcessingStep
 
 logger = logging.getLogger(__name__)
+
+SUCCESS_STOP_REASON = "end_turn"
 
 # ---------------------------------------------------------------------------
 # Edit here: each task type maps to exactly one fixed filename.
@@ -22,8 +25,6 @@ TASK_CATALOG: dict[str, str] = {
     "ledger_reconcile": "ledger_reconcile.csv",
 }
 
-TOOL_NAME = "extract_tasks_from_email"
-
 SYSTEM_PROMPT = """You extract processing tasks from email notifications.
 
 Allowed task types and their fixed filenames (always use this exact pairing):
@@ -34,8 +35,8 @@ Allowed task types and their fixed filenames (always use this exact pairing):
 - ledger_reconcile → ledger_reconcile.csv
 
 Rules:
-1. Call the extract_tasks_from_email tool exactly once.
-2. Return all matching tasks in that single call as the tasks array (use [] if none match).
+1. Return a single JSON object that matches the provided schema.
+2. Return all matching tasks in the tasks array (use [] if none match).
 3. Each task must use one of the allowed types above and its matching fixed filename.
 4. Do not invent new task types or filenames.
 5. Only include types that clearly apply to the email.
@@ -47,84 +48,101 @@ Rules:
    - "null" if no process date/time can be determined
 """
 
-TOOL_CONFIG: dict[str, Any] = {
-    "tools": [
-        {
-            "toolSpec": {
-                "name": TOOL_NAME,
+OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "tasks": {
+            "type": "array",
+            "description": "Tasks to process, derived from the email notification.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": list(TASK_CATALOG.keys()),
+                        "description": "Task type from the allowed catalog.",
+                    },
+                    "filename": {
+                        "type": "string",
+                        "enum": list(TASK_CATALOG.values()),
+                        "description": (
+                            "Fixed filename for the chosen task type "
+                            "(must match the catalog pairing)."
+                        ),
+                    },
+                    "process_date": {
+                        "type": "string",
+                        "description": (
+                            "When this task should be processed: ISO 8601 "
+                            "(YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, with optional timezone); "
+                            "'now' if it should be processed immediately; "
+                            "or 'null' if no date is found."
+                        ),
+                    },
+                },
+                "required": ["type", "filename", "process_date"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["tasks"],
+    "additionalProperties": False,
+}
+
+OUTPUT_CONFIG: dict[str, Any] = {
+    "textFormat": {
+        "type": "json_schema",
+        "structure": {
+            "jsonSchema": {
+                "schema": json.dumps(OUTPUT_SCHEMA),
+                "name": "extract_tasks_from_email",
                 "description": (
                     "Extract matching tasks from an email notification. "
                     "Each task must be one of the allowed types with its fixed filename, "
                     "plus when it should be processed."
                 ),
-                "inputSchema": {
-                    "json": {
-                        "type": "object",
-                        "properties": {
-                            "tasks": {
-                                "type": "array",
-                                "description": "Tasks to process, derived from the email notification.",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "type": {
-                                            "type": "string",
-                                            "enum": list(TASK_CATALOG.keys()),
-                                            "description": "Task type from the allowed catalog.",
-                                        },
-                                        "filename": {
-                                            "type": "string",
-                                            "enum": list(TASK_CATALOG.values()),
-                                            "description": (
-                                                "Fixed filename for the chosen task type "
-                                                "(must match the catalog pairing)."
-                                            ),
-                                        },
-                                        "process_date": {
-                                            "type": "string",
-                                            "description": (
-                                                "When this task should be processed: ISO 8601 "
-                                                "(YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, with optional timezone); "
-                                                "'now' if it should be processed immediately; "
-                                                "or 'null' if no date is found."
-                                            ),
-                                        },
-                                    },
-                                    "required": ["type", "filename", "process_date"],
-                                },
-                            },
-                        },
-                        "required": ["tasks"],
-                    }
-                },
             }
-        }
-    ],
-    "toolChoice": {"tool": {"name": TOOL_NAME}},
+        },
+    }
 }
+
+DEFAULT_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+# -------------------------------------------------------------
+# End of edit area
+# -------------------------------------------------------------
 
 
 class BedrockProcessingStep(ProcessingStep):
     name = "bedrock"
 
-    def __init__(self, bedrock_client: Any | None = None) -> None:
-        self._bedrock_client = bedrock_client
-        self._model_id = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
+    def __init__(self) -> None:
+        self._bedrock_client = boto3.client("bedrock-runtime")
+        self._model_id = os.getenv("BEDROCK_MODEL_ID", DEFAULT_MODEL_ID)
         self._max_tokens = int(os.getenv("BEDROCK_MAX_TOKENS", "1024"))
-
-    @property
-    def _bedrock(self) -> Any:
-        if self._bedrock_client is None:
-            self._bedrock_client = boto3.client("bedrock-runtime")
-        return self._bedrock_client
 
     def process(self, event: dict[str, Any], context: Context) -> Context:
         ses_email = context.get(PROCESSING_SES_EMAIL) or {}
         user_prompt = self._build_user_prompt(ses_email)
 
+        # Invoke Bedrock model
         logger.info("Invoking Bedrock model=%s", self._model_id)
-        fields = self._invoke_structured(user_prompt)
+        response = self._bedrock_client.converse(
+            modelId=self._model_id,
+            system=[{"text": SYSTEM_PROMPT}],
+            messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+            inferenceConfig={"maxTokens": self._max_tokens},
+            outputConfig=OUTPUT_CONFIG,
+        )
 
+        # Validate response
+        stop_reason = response.get("stopReason")
+        if stop_reason != SUCCESS_STOP_REASON:
+            raise PipelineError(
+                f"Bedrock structured output is not complete (stopReason={stop_reason!r})"
+            )
+
+        fields = self._parse_structured_json(response)
         tasks = fields.get("tasks")
         if not isinstance(tasks, list):
             tasks = []
@@ -133,57 +151,53 @@ class BedrockProcessingStep(ProcessingStep):
         return context
 
     @staticmethod
-    def _attachment_names(attachments: list[Any]) -> list[str]:
-        return [
-            item["filename"]
-            for item in attachments
-            if isinstance(item, dict) and item.get("filename")
-        ]
-
-    @staticmethod
-    def _format_attachments_section(attachment_names: list[str]) -> str:
-        if not attachment_names:
-            return "Attachments: (none)"
-        return "Attachments:\n" + "\n".join(f"- {name}" for name in attachment_names)
-
-    @classmethod
-    def _build_user_prompt(cls, ses_email: dict[str, Any]) -> str:
+    def _build_user_prompt(ses_email: dict[str, Any]) -> str:
         received_date = ses_email.get("date") or "(unknown)"
         body = ses_email.get("body") or ""
-        attachment_names = cls._attachment_names(ses_email.get("attachments") or [])
-        attachments_section = cls._format_attachments_section(attachment_names)
+
+        # Build attachments section
+        attachment_names = []
+        for item in ses_email.get("attachments") or []:
+            if isinstance(item, dict) and item.get("filename"):
+                attachment_names.append(item["filename"])
+        attachments_section = (
+            "Attachments:\n" + "\n".join(f"- {name}" for name in attachment_names)
+            if attachment_names
+            else "Attachments: (none)"
+        )
+
+        # Build user prompt with rest of email content
         return (
             f"Email received date: {received_date}\n\n"
             f"Email body:\n{body}\n\n"
             f"{attachments_section}"
         )
 
-    def _invoke_structured(self, user_prompt: str) -> dict[str, Any]:
-        """Call Bedrock Converse with a forced tool so the model returns JSON fields."""
-        response = self._bedrock.converse(
-            modelId=self._model_id,
-            system=[{"text": SYSTEM_PROMPT}],
-            messages=[{"role": "user", "content": [{"text": user_prompt}]}],
-            inferenceConfig={"maxTokens": self._max_tokens},
-            toolConfig=TOOL_CONFIG,
-        )
+    @staticmethod
+    def _parse_structured_json(response: dict[str, Any]) -> dict[str, Any]:
+        parts = response.get("output", {}).get("message", {}).get("content")
+        if not isinstance(parts, list) or not parts:
+            raise PipelineError("Bedrock structured output missing message content")
 
-        parts = response.get("output", {}).get("message", {}).get("content", [])
+        # Get the stringified JSON object/array from the response (other parts like tool use are ignored)
+        raw_text = ''
         for part in parts:
-            tool_use = part.get("toolUse")
-            if not tool_use:
+            if not isinstance(part, dict) or not isinstance(part.get("text"), str):
                 continue
-            if tool_use.get("name") != TOOL_NAME:
-                continue
-            raw_input = tool_use.get("input") or {}
-            if isinstance(raw_input, dict):
-                logger.info(
-                    "Bedrock tool=%s stopReason=%s keys=%s",
-                    TOOL_NAME,
-                    response.get("stopReason"),
-                    sorted(raw_input.keys()),
-                )
-                return raw_input
+            raw_text = part["text"].strip()
+            if raw_text:
+                break
+        if not raw_text:
+            raise PipelineError("Bedrock structured output missing text content")
 
-        # Model ignored toolChoice (rare / unsupported models).
-        raise PipelineError(f"Bedrock returned no toolUse for {TOOL_NAME}")
+        # Parse the JSON
+        try:
+            fields = json.loads(raw_text)
+        except json.JSONDecodeError as exc:
+            raise PipelineError(
+                f"Bedrock structured output is not valid JSON: {exc}"
+            ) from exc
+
+        if not isinstance(fields, dict):
+            raise PipelineError("Bedrock structured output JSON must be an object")
+        return fields
