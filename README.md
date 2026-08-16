@@ -1,80 +1,80 @@
 # step-lambda
 
-AWS Lambda pipeline: **Processing Steps → Output Steps**, configured in `main.py`.
+This stack turns a mailbox you control into an intake pipeline. Incoming mail is read, tasks are extracted, and the result shows up in different output formats, such as a Jira issue or a Slack notification.
 
-SES stores inbound mail in S3; S3 notifies the Lambda. The first processing step parses that object.
+![Architecture](https://github.com/user-attachments/assets/ee0f3bda-9b40-412a-bf27-522cb059ba56)
 
-```
-SES → S3 ──► SES parse ──► From filter ──► Bedrock ──► Jira / Slack
-```
+## Installation
 
-## Layout
+You need to install the following first: 
+- **Python 3.14**
+- [uv](https://docs.astral.sh/uv/)
+- [Terraform](https://developer.hashicorp.com/terraform/install)
 
-```
-src/step_lambda/
-  main.py                 # pipeline config + Processing → Output wiring
-  config.py               # dotenv + Secrets Manager (production only)
-  utils/                  # shared helpers (Context, …)
-  processing_steps/       # steps (SESEmail, FilterFrom, Bedrock, …)
-  output_steps/           # notifiers (Jira, Slack)
-terraform/                # root: providers + module wiring
-  modules/step-lambda/    # SES, Lambda, Secrets Manager, IAM, S3
-```
+Separately, within AWS, you need credentials that can at least create SES, S3, Lambda, IAM, Secrets Manager, and Bedrock resources.
 
-## Pipeline contract
-
-1. **Processing steps** – run in list order; each may add keys for later stages.
-2. **Output steps** – run in list order; each notifies using the final context.
-
-SES parsing reads the Lambda `event` and injects `processing::ses_email`
-(`subject`, `body`, `from`, attachments, …).
-`FilterFromProcessingStep` allowlists `From` via `FILTER_FROM_EMAILS` (comma-separated); non-matches raise `StopPipeline`.
-Bedrock builds a user prompt from the email body and attachment filenames,
-asks Converse for schema-constrained JSON, and sets `processing::bedrock`
-(`tasks`) on the context. Edit the output schema in
-`bedrock_processing_step.py` to change the extracted fields. Requires a
-Claude 4.5+ (or other structured-output) model.
-
-Edit order / membership via the step lists in [`src/step_lambda/main.py`](src/step_lambda/main.py)
-(`PROCESSING_STEPS`, `OUTPUT_STEPS`).
-
-## Local setup
-
-Requires [uv](https://docs.astral.sh/uv/) and Python 3.14+.
-
+Run the following instructions to clone and install the dependencies
 ```bash
+git clone git@github.com:Weiyuan-Lane/step-lambda.git
+cd step-lambda
 uv sync
-cp .env.example .env
-# fill in notifier credentials as needed
 ```
 
-## Deploy (Terraform)
-
-1. Package + apply:
-
+Next, initialize Terraform once from the `terraform/` directory:
 ```bash
-cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-# set step_lambda_ses_domain, step_lambda_ses_recipient, step_lambda_secret_values
-
 cd terraform
 terraform init
+```
+
+That's it, setup is complete!
+
+## Usage
+
+Copy `terraform/terraform.tfvars.example` to `terraform/terraform.tfvars` and replace the placeholders with your region, SES domain and recipient, From allowlist, Slack notify handles, and Jira/Slack secret values. `terraform.tfvars` is gitignored.
+
+From `terraform/`, preview the stack, then apply it:
+
+```bash
+terraform plan
+```
+
+```bash
 terraform apply
 ```
 
-Terraform runs `scripts/build_step_lambda.sh` (via `uv`) to build `.build/step-lambda.zip`, then creates:
+Before you deploy, make sure to enable the Bedrock model you plan to use in the target region by using the model at least one time in the web console. You should also set up the MX, TXT, and CNAME records in your domain registrar before sending emails via your targetted domain.
 
-- Lambda (`python3.14`, handler `step_lambda.main.handler`)
-- Secrets Manager secret (credentials for Jira / Slack)
-- S3 bucket for inbound SES mail
-- SES domain identity + receipt rule (S3 store) and S3 → Lambda notification
-- IAM role with S3 read, Secrets Manager read, Bedrock invoke
+## Design
 
-2. Finish SES DNS: apply the TXT / DKIM values from `terraform output`, and point the domain MX to `inbound-smtp.<region>.amazonaws.com`.
+The Lambda is a short pipeline: all steps share a `Context` variable and are run sequentially. Any unexpected error exits early, while caught exceptions for expected situations (e.g. email received from unintended users) are ignored and processing is paused from there.
 
-3. Enable the Bedrock model in the AWS console for your region.
+![Code design](https://github.com/user-attachments/assets/b06af5a1-4f47-4691-890f-11d8344454cc)
 
-## Adding a component
+**Pipeline Overview:**
 
-1. Subclass `ProcessingStep` / `OutputStep` in the matching package.
-2. Add the class to `PROCESSING_STEPS` / `OUTPUT_STEPS` in `main.py` in the desired order.
-3. Document any new context keys you read or write.
+- **Processing steps**
+  - Built on a common interface
+  - Parse → validate → extract tasks from emails
+  - Easily add, remove, or swap steps sequence
+
+- **Output steps**
+  - Also use a shared interface
+  - Define where/how results go (e.g., Jira, Slack)
+  - Plug in new output channels with minimal code
+
+```
+src/step_lambda/
+  main.py                 handler + pipeline order
+  config.py               .env locally; Secrets Manager in production
+  processing_steps/       parse email → allowlist From → Bedrock extract
+  output_steps/           create Jira issue → post Slack message
+  utils/                  Context and pipeline errors
+terraform/                root module + modules/step-lambda (SES, S3, Lambda, IAM, secrets)
+scripts/build_step_lambda.sh   zip built by Terraform before deploy
+```
+
+**Benefits:**
+- Clear, modular pipeline design
+- Easy to extend: just implement the right interface
+- Steps are single-purpose and simple to test
+
